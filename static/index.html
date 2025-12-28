@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        base: { black: "#000000", white: "#FFFFFF" },
+                        gray: { 50:"#F8F8F8", 100:"#F2F2F2", 200:"#E6E6E6", 400:"#A8A8A8", 600:"#6E6E6E" },
+                        accent: "#055A45",
+                        success: "#0C7A43",
+                        warning: "#D68B00",
+                        error: "#C8372D",
+                    },
+                    borderRadius: { md: "6px", sm: "4px" },
+                    fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] },
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex font-sans text-base-black">
+    <!-- Sidebar -->
+    <div class="w-64 bg-base-white border-r border-gray-200 flex flex-col">
+        <div class="p-6 border-b border-gray-200">
+            <h1 class="text-xl font-bold tracking-tight">RAG Agent</h1>
+        </div>
+        <div class="p-4 border-b border-gray-200">
+            <h3 class="text-xs font-medium text-gray-600 uppercase tracking-wider mb-2">Collections</h3>
+            <form id="createCollectionForm" class="flex gap-2">
+                <input type="text" id="newCollectionName" placeholder="New Collection" class="flex-1 bg-gray-50 border border-gray-200 rounded-sm px-2 py-1.5 text-sm focus:outline-none focus:border-accent">
+                <button type="submit" class="bg-accent text-base-white px-3 py-1.5 rounded-sm text-sm hover:bg-opacity-90 font-medium transition-colors">+</button>
+            </form>
+        </div>
+        <div id="collectionsList" class="flex-1 overflow-y-auto p-2 space-y-1">
+            <!-- Collections will be added here -->
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex flex-col bg-gray-50">
+        <!-- Header -->
+        <div class="bg-base-white px-8 py-4 border-b border-gray-200 flex justify-between items-center shadow-sm z-10">
+            <h2 id="currentCollectionName" class="text-lg font-semibold text-base-black">Select a Collection</h2>
+            <div id="uploadSection" class="hidden">
+                 <span class="text-sm text-gray-600">To upload files, please use the <a href="https://dev.alapi.deep.sa/dashboard" target="_blank" class="text-accent hover:underline font-medium">Dashboard</a></span>
+            </div>
+        </div>
+
+        <!-- Chat Area -->
+        <div id="chatContainer" class="flex-1 overflow-y-auto p-8 space-y-6 hidden">
+            <!-- Messages -->
+            <div class="flex justify-center text-gray-400 text-sm">
+                Start the conversation with your documents.
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div id="inputArea" class="bg-base-white p-6 border-t border-gray-200 hidden">
+            <form id="chatForm" class="max-w-4xl mx-auto relative flex gap-3">
+                <input type="text" id="messageInput" placeholder="Ask a question about your documents..." class="w-full bg-gray-50 border border-gray-200 rounded-md px-4 py-3 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all shadow-sm">
+                <button type="submit" class="absolute right-2 top-2 bottom-2 bg-accent text-base-white px-4 rounded-md text-sm font-medium hover:bg-opacity-90 transition-colors">Send</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentCollectionId = null;
+
+        // Load Collections
+        async function loadCollections() {
+            try {
+                const res = await fetch('/collections');
+                if (!res.ok) throw new Error('Failed to fetch collections');
+                const data = await res.json();
+                const list = document.getElementById('collectionsList');
+                list.innerHTML = '';
+                
+                // Handle different response structures
+                let collections = [];
+                if (Array.isArray(data)) {
+                    collections = data;
+                } else if (data && Array.isArray(data.collections)) {
+                    collections = data.collections;
+                }
+                
+                if (collections.length === 0) {
+                     list.innerHTML = '<div class="text-xs text-gray-400 p-2 text-center">No collections yet</div>';
+                }
+
+                collections.forEach(col => {
+                    const div = document.createElement('div');
+                    // Active state vs Inactive state
+                    const isActive = currentCollectionId === col.id;
+                    div.className = `p-3 rounded-md cursor-pointer text-sm font-medium transition-colors ${
+                        isActive 
+                        ? 'bg-gray-100 text-base-black' 
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-base-black'
+                    }`;
+                    div.textContent = col.name;
+                    div.onclick = () => selectCollection(col.id, col.name);
+                    list.appendChild(div);
+                });
+            } catch (e) {
+                console.error("Failed to load collections", e);
+                const list = document.getElementById('collectionsList');
+                list.innerHTML = '<div class="text-xs text-error p-2">Error loading collections</div>';
+            }
+        }
+
+        // Create Collection
+        document.getElementById('createCollectionForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const nameInput = document.getElementById('newCollectionName');
+            const name = nameInput.value;
+            if (!name) return;
+            
+            try {
+                const res = await fetch('/collections', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name})
+                });
+                if (!res.ok) throw new Error('Failed to create collection');
+                nameInput.value = '';
+                loadCollections();
+            } catch (e) {
+                alert("Failed to create collection");
+            }
+        };
+
+        // Select Collection
+        function selectCollection(id, name) {
+            currentCollectionId = id;
+            document.getElementById('currentCollectionName').textContent = name;
+            document.getElementById('uploadSection').classList.remove('hidden');
+            document.getElementById('chatContainer').classList.remove('hidden');
+            document.getElementById('inputArea').classList.remove('hidden');
+            document.getElementById('chatContainer').innerHTML = ''; // Clear chat
+            loadCollections(); // Refresh highlight
+        }
+
+        // Chat
+        document.getElementById('chatForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('messageInput');
+            const query = input.value;
+            if (!query) return;
+
+            // Add User Message
+            addMessage('user', query);
+            input.value = '';
+
+            // Loading state
+            const loadingId = addMessage('bot', 'Thinking...');
+
+            try {
+                const res = await fetch('/ask', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        collection_id: currentCollectionId,
+                        query: query
+                    })
+                });
+                const data = await res.json();
+                
+                // Remove loading message
+                document.getElementById(loadingId).remove();
+                
+                // Add Bot Message
+                addMessage('bot', data.answer);
+            } catch (err) {
+                const loadingEl = document.getElementById(loadingId);
+                if (loadingEl) {
+                   loadingEl.querySelector('div').textContent = 'Error: ' + err.message;
+                   loadingEl.querySelector('div').classList.add('bg-red-100', 'text-error');
+                }
+            }
+        };
+
+        function addMessage(role, text) {
+            const container = document.getElementById('chatContainer');
+            const div = document.createElement('div');
+            const id = 'msg-' + Date.now();
+            div.id = id;
+            div.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            const bubble = document.createElement('div');
+            // User: Accent color, White text
+            // Bot: White background, Border, Black text
+            bubble.className = `max-w-[80%] rounded-md px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                role === 'user' 
+                ? 'bg-accent text-base-white' 
+                : 'bg-base-white border border-gray-200 text-base-black'
+            }`;
+            bubble.textContent = text;
+            
+            div.appendChild(bubble);
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+            return id;
+        }
+
+        // Init
+        loadCollections();
+    </script>
+</body>
+</html>
